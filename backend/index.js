@@ -9,24 +9,76 @@ const app = express();
 // Lê a porta injetada pelo Cloud Run ou utiliza 5000 localmente
 const port = process.env.PORT || 5000;
 
+// Configurações de observabilidade
+const SERVICE_NAME = process.env.SERVICE_NAME || 'sword-backend';
+const ENVIRONMENT = process.env.ENVIRONMENT || 'production';
+
+
+function log(level, message, extra = {}) {
+  console.log(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    service_name: SERVICE_NAME,
+    environment: ENVIRONMENT,
+    level,
+    message,
+    ...extra
+  }));
+};
+
+app.use((req, res, next) => {
+  const start = process.hrtime.bigint();
+
+  res.on('finish', () => {
+    const end = process.hrtime.bigint();
+
+    const durationMs = Number(end - start) / 1_000_000;
+
+    log(
+      res.statusCode >= 500
+        ? 'ERROR'
+        : res.statusCode >= 400
+          ? 'WARN'
+          : 'INFO',
+      'HTTP request',
+      {
+        http_method: req.method,
+        route: req.route?.path || req.path,
+        status_code: res.statusCode,
+        duration_ms: Math.round(durationMs)
+      }
+    );
+  });
+
+  next();
+});
+
 // Obtém a URI do MongoDB a partir das variáveis de ambiente
-const mongoURI = process.env.MONGO_URI || 'mongodb://root:rootpassword@mongo-todo:27017/todo-app?authSource=admin';
+const mongoURI = process.env.MONGO_URI;
+
+if (!mongoURI) {
+  log('ERROR', 'MONGO_URI não configurada');
+  process.exit(1);
+}
 
 // Conexão com o MongoDB
 mongoose.connect(mongoURI)
-  .then(() => console.log('Conectado ao MongoDB'))
-  .catch((err) => console.error('Erro ao conectar ao MongoDB:', err));
+  .then(() => {
+    log('INFO', 'Conexão com MongoDB estabelecida');
+  })
+.catch(() => {
+  log('ERROR', 'Erro ao conectar ao MongoDB');
+  });
+
 
 // Middleware para habilitar CORS e processar JSON
 app.use(cors());
 app.use(bodyParser.json());
 
-// Rota de Health Check para verificação do serviço
-app.get('/health', (req, res) => {
+app.get('/api/health', (req, res) => {
   res.status(200).send('Backend OK');
 });
 
-// Definindo o modelo de Tarefa (To-do)
+
 const TodoSchema = new mongoose.Schema({
   text: { type: String, required: true },
   completed: { type: Boolean, default: false },
@@ -34,23 +86,26 @@ const TodoSchema = new mongoose.Schema({
 
 const Todo = mongoose.model('Todo', TodoSchema);
 
-// Rota para obter todas as tarefas (GET)
-app.get('/todos', async (req, res) => {
+
+app.get('/api/todos', async (req, res) => {
   try {
-    const todos = await Todo.find(); // Retorna todas as tarefas do banco
+    const todos = await Todo.find();
     res.json(todos);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({
+      message: err.message
+    });
   }
 });
 
-// Rota para adicionar uma nova tarefa (POST)
-app.post('/todos', async (req, res) => {
-  const { text } = req.body; // Obtém o texto da tarefa do corpo da requisição
 
-  // Verifica se o campo "text" está presente
+app.post('/api/todos', async (req, res) => {
+  const { text } = req.body;
+
   if (!text) {
-    return res.status(400).json({ message: 'O campo "text" é obrigatório' });
+    return res.status(400).json({
+      message: 'O campo "text" é obrigatório',
+    });
   }
 
   const todo = new Todo({
@@ -59,47 +114,63 @@ app.post('/todos', async (req, res) => {
   });
 
   try {
-    const newTodo = await todo.save(); // Salva a tarefa no banco
-    res.status(201).json(newTodo); // Retorna a tarefa criada
+    const newTodo = await todo.save();
+
+    res.status(201).json(newTodo);
   } catch (err) {
-    res.status(400).json({ message: err.message }); // Retorna erro se houver falha no banco de dados
+    res.status(400).json({
+      message: err.message,
+    });
   }
 });
 
-// Rota para marcar uma tarefa como concluída (PATCH)
-app.patch('/todos/:id', async (req, res) => {
+
+app.patch('/api/todos/:id', async (req, res) => {
   try {
-    const todo = await Todo.findById(req.params.id); // Encontra a tarefa pelo ID
+    const todo = await Todo.findById(req.params.id);
 
     if (!todo) {
-      return res.status(404).json({ message: 'Tarefa não encontrada' });
+      return res.status(404).json({
+        message: 'Tarefa não encontrada',
+      });
     }
 
-    // Alterna o status de "completed" da tarefa
     todo.completed = !todo.completed;
-    await todo.save(); // Salva a tarefa modificada
-    res.json(todo); // Retorna a tarefa atualizada
+
+    await todo.save();
+
+    res.json(todo);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({
+      message: err.message,
+    });
   }
 });
 
-// Rota para excluir uma tarefa (DELETE)
-app.delete('/todos/:id', async (req, res) => {
+
+app.delete('/api/todos/:id', async (req, res) => {
   try {
-    const todo = await Todo.findByIdAndDelete(req.params.id); // Deleta a tarefa pelo ID
+    const todo = await Todo.findByIdAndDelete(req.params.id);
 
     if (!todo) {
-      return res.status(404).json({ message: 'Tarefa não encontrada' });
+      return res.status(404).json({
+        message: 'Tarefa não encontrada',
+      });
     }
 
-    res.json({ message: 'Tarefa excluída com sucesso' }); // Retorna uma mensagem de sucesso
+    res.json({
+      message: 'Tarefa excluída com sucesso',
+    });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({
+      message: err.message,
+    });
   }
 });
 
-// Iniciando o servidor na porta definida
+
 app.listen(port, () => {
-  console.log(`Servidor rodando na porta ${port}`);
+  log('INFO', 'Servidor iniciado', {
+    port
+  });
 });
