@@ -165,15 +165,3 @@ app.delete('/api/todos/:id', async (req, res) => {
   }
 });
 
-// Rota temporária para teste controlado de falha
-app.get('/api/test-error', (req, res) => {
-  res.status(500).json({
-    error: 'Falha controlada para teste de observabilidade'
-  });
-});
-
-app.listen(port, () => {
-  log('INFO', 'Servidor iniciado', {
-    port
-  });
-});
