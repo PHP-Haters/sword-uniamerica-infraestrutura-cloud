@@ -13,17 +13,21 @@ const port = process.env.PORT || 5000;
 const SERVICE_NAME = process.env.SERVICE_NAME || 'sword-backend';
 const ENVIRONMENT = process.env.ENVIRONMENT || 'production';
 
-
 function log(level, message, extra = {}) {
   console.log(JSON.stringify({
     timestamp: new Date().toISOString(),
+    severity: level,
     service_name: SERVICE_NAME,
     environment: ENVIRONMENT,
     level,
     message,
     ...extra
   }));
-};
+}
+
+// Habilita CORS e processamento de JSON
+app.use(cors());
+app.use(bodyParser.json());
 
 app.use((req, res, next) => {
   const start = process.hrtime.bigint();
@@ -65,19 +69,15 @@ mongoose.connect(mongoURI)
   .then(() => {
     log('INFO', 'Conexão com MongoDB estabelecida');
   })
-.catch(() => {
-  log('ERROR', 'Erro ao conectar ao MongoDB');
+  .catch((err) => {
+    log('ERROR', 'Erro ao conectar ao MongoDB', {
+      error: err.message
+    });
   });
-
-
-// Middleware para habilitar CORS e processar JSON
-app.use(cors());
-app.use(bodyParser.json());
 
 app.get('/api/health', (req, res) => {
   res.status(200).send('Backend OK');
 });
-
 
 const TodoSchema = new mongoose.Schema({
   text: { type: String, required: true },
@@ -86,10 +86,10 @@ const TodoSchema = new mongoose.Schema({
 
 const Todo = mongoose.model('Todo', TodoSchema);
 
-
 app.get('/api/todos', async (req, res) => {
   try {
     const todos = await Todo.find();
+
     res.json(todos);
   } catch (err) {
     res.status(500).json({
@@ -97,7 +97,6 @@ app.get('/api/todos', async (req, res) => {
     });
   }
 });
-
 
 app.post('/api/todos', async (req, res) => {
   const { text } = req.body;
@@ -124,7 +123,6 @@ app.post('/api/todos', async (req, res) => {
   }
 });
 
-
 app.patch('/api/todos/:id', async (req, res) => {
   try {
     const todo = await Todo.findById(req.params.id);
@@ -147,7 +145,6 @@ app.patch('/api/todos/:id', async (req, res) => {
   }
 });
 
-
 app.delete('/api/todos/:id', async (req, res) => {
   try {
     const todo = await Todo.findByIdAndDelete(req.params.id);
@@ -167,7 +164,6 @@ app.delete('/api/todos/:id', async (req, res) => {
     });
   }
 });
-
 
 app.listen(port, () => {
   log('INFO', 'Servidor iniciado', {
